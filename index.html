@@ -13,7 +13,7 @@ html,body{margin:0;height:100%;background:#000;color:#AEB4BB;font:14px Arial,san
 <div id="idle">Mixtape YouTube player<br><small>Leave this window open. Mixtape tells it what to play.</small></div><div id="p"></div>
 <div id="con"><button id="conBtn">🔊 Connect sound to Mixtape</button><small>Then press <b>Allow</b> (and keep “share audio” on). After that this window can stay behind Mixtape.</small></div>
 <script>
-/* Mixtape's YouTube player (version 2). Mixtape (opened from your computer) opens this page in a small window and sends it commands
+/* Mixtape's YouTube player (version 3). Mixtape (opened from your computer) opens this page in a small window and sends it commands
    with postMessage; this page plays YouTube (which needs a real web address) and reports back what it is doing.
    Sound: this window shares its OWN tab (so Edge's "sharing" bar sits on this window, not on Mixtape) and sends the sound and picture
    to Mixtape over a WebRTC link inside the browser (no server; offers/answers travel by postMessage).
@@ -36,21 +36,28 @@ function run(m){if(!ready){queued=m;return;}
 /* the sound: share this tab, then send it to Mixtape */
 function hi(sdp){return sdp.replace(/a=fmtp:(\d+) (.*)/g,function(l,pt,p){return /useinbandfec/.test(p)?'a=fmtp:'+pt+' '+p+';stereo=1;sprop-stereo=1;maxaveragebitrate=510000;cbr=0':l;});}   /* Opus: stereo, top quality */
 async function capture(){if(ST&&ST.getAudioTracks().some(function(t){return t.readyState==='live';})){link();return;}
-  try{ST=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:{suppressLocalAudioPlayback:true,echoCancellation:false,noiseSuppression:false,autoGainControl:false},preferCurrentTab:true,selfBrowserSurface:'include',surfaceSwitching:'exclude'});}
+  try{ST=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30,max:30},width:{ideal:1280,max:1920},height:{ideal:720,max:1080}},audio:{suppressLocalAudioPlayback:true,echoCancellation:false,noiseSuppression:false,autoGainControl:false},preferCurrentTab:true,selfBrowserSurface:'include',surfaceSwitching:'exclude'});}
   catch(e){tell({mx:'cap',ok:false,why:e.name});document.getElementById('con').style.display='flex';return;}
   if(!ST.getAudioTracks().length){ST.getTracks().forEach(function(t){t.stop();});ST=null;tell({mx:'cap',ok:false,why:'NoAudio'});document.getElementById('con').style.display='flex';return;}
+  ST.getVideoTracks().forEach(function(t){try{t.contentHint='motion';}catch(e){}});   /* a music video: keep it moving smoothly */
   document.getElementById('con').style.display='none';ST.getAudioTracks()[0].onended=function(){ST=null;tell({mx:'cap',ok:false,why:'Ended'});};link();}
+/* the picture: the computer's own video chip (H.264) when there is one, plenty of room (the link never leaves this computer), 30 frames
+   a second kept steady rather than sharp when it has to choose; starts high instead of ramping up from a small picture */
+function hv(sdp){return sdp.replace(/a=fmtp:(\d+) (.*profile-level-id.*)/g,function(l,pt,p){return /x-google-/.test(p)?l:'a=fmtp:'+pt+' '+p+';x-google-start-bitrate=6000;x-google-min-bitrate=2500;x-google-max-bitrate=10000';});}
 async function link(){if(PC)try{PC.close();}catch(e){}PC=new RTCPeerConnection();ST.getTracks().forEach(function(t){PC.addTrack(t,ST);});
   PC.onicecandidate=function(e){tell({mx:'rtc',cand:e.candidate?e.candidate.toJSON():null});};
-  var off=await PC.createOffer();off={type:off.type,sdp:hi(off.sdp)};await PC.setLocalDescription(off);tell({mx:'rtc',sdp:{type:off.type,sdp:off.sdp}});
+  PC.getTransceivers().forEach(function(tr){if(!tr.sender.track||tr.sender.track.kind!=='video')return;
+    try{var C=RTCRtpSender.getCapabilities('video').codecs,h=C.filter(function(c){return /h264/i.test(c.mimeType);});if(h.length&&tr.setCodecPreferences)tr.setCodecPreferences(h.concat(C.filter(function(c){return !/h264/i.test(c.mimeType);})));}catch(e){}
+    try{var p=tr.sender.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];p.encodings[0].maxBitrate=10000000;p.encodings[0].maxFramerate=30;p.encodings[0].scaleResolutionDownBy=1;p.degradationPreference='maintain-framerate';tr.sender.setParameters(p).catch(function(){});}catch(e){}});
+  var off=await PC.createOffer();off={type:off.type,sdp:hv(hi(off.sdp))};await PC.setLocalDescription(off);tell({mx:'rtc',sdp:{type:off.type,sdp:off.sdp}});
   tell({mx:'cap',ok:true});}
 document.getElementById('conBtn').onclick=function(){capture();};
 addEventListener('message',function(e){var m=e.data;if(!m||typeof m!=='object'||typeof m.mx!=='string')return;if(e.source!==window.opener&&e.source!==window.parent)return;
-  if(m.mx==='hello'){tell({mx:'hello',ok:true,version:2});tell(state());return;}
+  if(m.mx==='hello'){tell({mx:'hello',ok:true,version:3});tell(state());return;}
   if(m.mx==='cap'){if(navigator.userActivation&&navigator.userActivation.isActive)capture();else if(ST)link();else{document.getElementById('con').style.display='flex';tell({mx:'cap',ok:false,why:'NeedClick'});}return;}
-  if(m.mx==='rtc'){if(!PC)return;if(m.sdp)PC.setRemoteDescription({type:m.sdp.type,sdp:hi(m.sdp.sdp)}).catch(function(){});else if(m.cand)PC.addIceCandidate(m.cand).catch(function(){});return;}
+  if(m.mx==='rtc'){if(!PC)return;if(m.sdp)PC.setRemoteDescription({type:m.sdp.type,sdp:hv(hi(m.sdp.sdp))}).catch(function(){});else if(m.cand)PC.addIceCandidate(m.cand).catch(function(){});return;}
   run(m);});
 setInterval(function(){if(ready)tell(state());},250);
 var s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);
-tell({mx:'hello',ok:true,version:2});
+tell({mx:'hello',ok:true,version:3});
 </script></body></html>
