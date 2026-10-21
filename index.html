@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mixtape YouTube player</title>
+<style>
+:root{color-scheme:dark}
+html,body{margin:0;height:100%;background:#000;color:#AEB4BB;font:14px Arial,sans-serif;overflow:hidden}
+#p{position:absolute;inset:0;width:100%;height:100%}
+#idle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}
+</style></head><body>
+<div id="idle">Mixtape YouTube player<br><small>Leave this window open. Mixtape tells it what to play.</small></div><div id="p"></div>
+<script>
+/* Mixtape's YouTube player. Mixtape (opened from your computer) opens this page in a small window and sends it commands with
+   postMessage; this page plays YouTube (which needs a real web address) and reports back what it is doing.
+   Commands: {mx:'load',id,start,play}  {mx:'play'}  {mx:'pause'}  {mx:'seek',t}  {mx:'vol',v:0-100}  {mx:'mute',on}  {mx:'hello'} */
+var P=null,ready=false,queued=null,lastErr=0;
+function tell(m){m.mx=m.mx||'state';try{(window.opener||window.parent).postMessage(m,'*');}catch(e){}}
+function state(){if(!P||!ready)return {mx:'state',ready:false,err:lastErr};var d={};try{d=P.getVideoData()||{};}catch(e){}
+  return {mx:'state',ready:true,state:P.getPlayerState(),time:P.getCurrentTime(),dur:P.getDuration(),id:d.video_id||'',title:d.title||'',author:d.author||'',vol:P.getVolume(),muted:P.isMuted(),err:lastErr};}
+function onYouTubeIframeAPIReady(){P=new YT.Player('p',{width:'100%',height:'100%',playerVars:{playsinline:1,rel:0,modestbranding:1,origin:location.origin},
+  events:{onReady:function(){ready=true;document.getElementById('idle').style.display='none';if(queued){run(queued);queued=null;}tell(state());},
+    onStateChange:function(){lastErr=0;tell(state());},onError:function(e){lastErr=e.data;tell(state());}}});}
+function run(m){if(!ready){queued=m;return;}
+  if(m.mx==='load'){lastErr=0;var o={videoId:String(m.id||'').slice(0,20),startSeconds:+m.start||0};if(m.play)P.loadVideoById(o);else P.cueVideoById(o);}
+  else if(m.mx==='play')P.playVideo();else if(m.mx==='pause')P.pauseVideo();
+  else if(m.mx==='seek')P.seekTo(Math.max(0,+m.t||0),true);
+  else if(m.mx==='vol')P.setVolume(Math.max(0,Math.min(100,+m.v||0)));
+  else if(m.mx==='mute'){if(m.on)P.mute();else P.unMute();}
+  tell(state());}
+addEventListener('message',function(e){var m=e.data;if(!m||typeof m!=='object'||typeof m.mx!=='string')return;if(e.source!==window.opener&&e.source!==window.parent)return;
+  if(m.mx==='hello'){tell({mx:'hello',ok:true,version:1});tell(state());return;}run(m);});
+setInterval(function(){if(ready)tell(state());},250);
+var s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);
+tell({mx:'hello',ok:true,version:1});
+</script></body></html>
