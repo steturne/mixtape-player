@@ -6,13 +6,20 @@
 html,body{margin:0;height:100%;background:#000;color:#AEB4BB;font:14px Arial,sans-serif;overflow:hidden}
 #p{position:absolute;inset:0;width:100%;height:100%}
 #idle{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px}
+#con{position:absolute;inset:0;z-index:5;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(0,0,0,.86);text-align:center;padding:16px}
+#con button{padding:14px 22px;border:0;border-radius:8px;background:#E2231A;color:#fff;font:800 17px Arial,sans-serif;cursor:pointer}
+#con small{color:#AEB4BB;max-width:380px}
 </style></head><body>
 <div id="idle">Mixtape YouTube player<br><small>Leave this window open. Mixtape tells it what to play.</small></div><div id="p"></div>
+<div id="con"><button id="conBtn">🔊 Connect sound to Mixtape</button><small>Then press <b>Allow</b> (and keep “share audio” on). After that this window can stay behind Mixtape.</small></div>
 <script>
-/* Mixtape's YouTube player. Mixtape (opened from your computer) opens this page in a small window and sends it commands with
-   postMessage; this page plays YouTube (which needs a real web address) and reports back what it is doing.
-   Commands: {mx:'load',id,start,play}  {mx:'play'}  {mx:'pause'}  {mx:'seek',t}  {mx:'vol',v:0-100}  {mx:'mute',on}  {mx:'hello'} */
-var P=null,ready=false,queued=null,lastErr=0;
+/* Mixtape's YouTube player (version 2). Mixtape (opened from your computer) opens this page in a small window and sends it commands
+   with postMessage; this page plays YouTube (which needs a real web address) and reports back what it is doing.
+   Sound: this window shares its OWN tab (so Edge's "sharing" bar sits on this window, not on Mixtape) and sends the sound and picture
+   to Mixtape over a WebRTC link inside the browser (no server; offers/answers travel by postMessage).
+   Commands: {mx:'load',id,start,play} {mx:'play'} {mx:'pause'} {mx:'seek',t} {mx:'vol',v:0-100} {mx:'mute',on} {mx:'hello'}
+             {mx:'cap'} (connect the sound) {mx:'rtc',sdp|cand} (the link) */
+var P=null,ready=false,queued=null,lastErr=0,ST=null,PC=null;
 function tell(m){m.mx=m.mx||'state';try{(window.opener||window.parent).postMessage(m,'*');}catch(e){}}
 function state(){if(!P||!ready)return {mx:'state',ready:false,err:lastErr};var d={};try{d=P.getVideoData()||{};}catch(e){}
   return {mx:'state',ready:true,state:P.getPlayerState(),time:P.getCurrentTime(),dur:P.getDuration(),id:d.video_id||'',title:d.title||'',author:d.author||'',vol:P.getVolume(),muted:P.isMuted(),err:lastErr};}
@@ -26,9 +33,24 @@ function run(m){if(!ready){queued=m;return;}
   else if(m.mx==='vol')P.setVolume(Math.max(0,Math.min(100,+m.v||0)));
   else if(m.mx==='mute'){if(m.on)P.mute();else P.unMute();}
   tell(state());}
+/* the sound: share this tab, then send it to Mixtape */
+function hi(sdp){return sdp.replace(/a=fmtp:(\d+) (.*)/g,function(l,pt,p){return /useinbandfec/.test(p)?'a=fmtp:'+pt+' '+p+';stereo=1;sprop-stereo=1;maxaveragebitrate=510000;cbr=0':l;});}   /* Opus: stereo, top quality */
+async function capture(){if(ST&&ST.getAudioTracks().some(function(t){return t.readyState==='live';})){link();return;}
+  try{ST=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:{suppressLocalAudioPlayback:true,echoCancellation:false,noiseSuppression:false,autoGainControl:false},preferCurrentTab:true,selfBrowserSurface:'include',surfaceSwitching:'exclude'});}
+  catch(e){tell({mx:'cap',ok:false,why:e.name});document.getElementById('con').style.display='flex';return;}
+  if(!ST.getAudioTracks().length){ST.getTracks().forEach(function(t){t.stop();});ST=null;tell({mx:'cap',ok:false,why:'NoAudio'});document.getElementById('con').style.display='flex';return;}
+  document.getElementById('con').style.display='none';ST.getAudioTracks()[0].onended=function(){ST=null;tell({mx:'cap',ok:false,why:'Ended'});};link();}
+async function link(){if(PC)try{PC.close();}catch(e){}PC=new RTCPeerConnection();ST.getTracks().forEach(function(t){PC.addTrack(t,ST);});
+  PC.onicecandidate=function(e){tell({mx:'rtc',cand:e.candidate?e.candidate.toJSON():null});};
+  var off=await PC.createOffer();off={type:off.type,sdp:hi(off.sdp)};await PC.setLocalDescription(off);tell({mx:'rtc',sdp:{type:off.type,sdp:off.sdp}});
+  tell({mx:'cap',ok:true});}
+document.getElementById('conBtn').onclick=function(){capture();};
 addEventListener('message',function(e){var m=e.data;if(!m||typeof m!=='object'||typeof m.mx!=='string')return;if(e.source!==window.opener&&e.source!==window.parent)return;
-  if(m.mx==='hello'){tell({mx:'hello',ok:true,version:1});tell(state());return;}run(m);});
+  if(m.mx==='hello'){tell({mx:'hello',ok:true,version:2});tell(state());return;}
+  if(m.mx==='cap'){if(navigator.userActivation&&navigator.userActivation.isActive)capture();else if(ST)link();else{document.getElementById('con').style.display='flex';tell({mx:'cap',ok:false,why:'NeedClick'});}return;}
+  if(m.mx==='rtc'){if(!PC)return;if(m.sdp)PC.setRemoteDescription({type:m.sdp.type,sdp:hi(m.sdp.sdp)}).catch(function(){});else if(m.cand)PC.addIceCandidate(m.cand).catch(function(){});return;}
+  run(m);});
 setInterval(function(){if(ready)tell(state());},250);
 var s=document.createElement('script');s.src='https://www.youtube.com/iframe_api';document.head.appendChild(s);
-tell({mx:'hello',ok:true,version:1});
+tell({mx:'hello',ok:true,version:2});
 </script></body></html>
