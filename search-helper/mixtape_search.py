@@ -5,7 +5,7 @@ Run it and leave it open while you use Mixtape:   python mixtape_search.py
 (first time: pip install yt-dlp; keep it fresh with: pip install -U yt-dlp)
 
 Mixtape asks it:  http://127.0.0.1:8765/search?q=daft+punk+one+more+time&n=10
-and gets back:    {"ok":true,"items":[{"id","title","author","dur","thumb"}, ...]}
+and gets back:    {"ok":true,"items":[{"id","title","author","dur","live","thumb"}, ...]}
 It only finds video IDs; the Mixtape player still plays them through YouTube's own embed.
 It listens on this computer only (127.0.0.1), so nothing else on your network can use it.
 """
@@ -42,6 +42,7 @@ def search(q, n):
             "title": e.get("title") or "",
             "author": e.get("channel") or e.get("uploader") or "",
             "dur": e.get("duration"),   # seconds, or null for live streams
+            "live": e.get("live_status") == "is_live",
             "thumb": thumbs[-1]["url"] if thumbs else f"https://i.ytimg.com/vi/{e['id']}/hqdefault.jpg",
         })
     with lock:

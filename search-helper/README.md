@@ -11,19 +11,10 @@ python mixtape_search.py
 
 Leave the window open while you DJ. If searches start failing, YouTube has changed something; update with `pip install -U yt-dlp`.
 
-## Use it from Mixtape
+## How Mixtape uses it
 
-Paste this into Mixtape's script. It tries the helper first and only falls back to the official API (100 searches a day) if the helper isn't running:
+Mixtape's `dj.js` checks for the helper at `http://127.0.0.1:8765` whenever you search. It uses the helper for both the 🔍 search window and the overnight music-video run. The search window then shows "search helper on · no daily limit".
 
-```js
-async function ytSearch(q, n = 10) {
-  try {
-    const r = await fetch('http://127.0.0.1:8765/search?n=' + n + '&q=' + encodeURIComponent(q));
-    const j = await r.json();
-    if (j.ok) return j.items;            // [{id, title, author, dur, thumb}]
-  } catch (e) { /* helper not running */ }
-  return apiSearch(q, n);                // your existing YouTube Data API search, mapped to the same shape
-}
-```
+When the helper isn't running, Mixtape uses your YouTube search key as before (about 100 searches a day). Without a key, the helper alone is enough.
 
-Then play a result exactly as before: `player.postMessage({mx:'load', id: item.id, play: true}, '*')`.
+One difference: the helper can't filter out videos whose owners block playback outside YouTube. If you pick one of those, the player shows its usual "can't play this video" message. The overnight run then tries the next match from the same search.
